@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>Smart Parking - 3D Analytics Pro</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Kanit:wght@300;400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  
+  <style>
+    :root {
+      --bg-color: #05080a;
+      --vacant-color: #00ff88;
+      --occupied-color: #ff3d71;
+      --accent: #00d2ff;
+      --glass: rgba(255, 255, 255, 0.05);
+    }
+    body {
+      font-family: 'Orbitron', 'Kanit', sans-serif;
+      background: var(--bg-color);
+      background-image: radial-gradient(circle at center, #1a2639 0%, #05080a 100%);
+      color: white; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+    }
+
+    /* Layout Containers */
+    .dashboard-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 30px; width: 95%; margin-top: 20px; }
+    
+    .stat-card { 
+      padding: 15px 25px; border-radius: 15px; background: var(--glass); 
+      border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); 
+      text-align: center; min-width: 140px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+
+    /* 3D Scene */
+    .scene { perspective: 1200px; margin: 40px 0; }
+    .parking-grid { display: grid; grid-template-columns: repeat(2, 180px); gap: 40px; transform-style: preserve-3d; transform: rotateX(45deg) rotateZ(-15deg); }
+    .slot { position: relative; width: 180px; height: 230px; background: rgba(255, 255, 255, 0.02); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 12px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding-bottom: 20px; transform-style: preserve-3d; transition: 0.5s; }
+    .slot.occupied { border-color: var(--occupied-color); box-shadow: 0 0 25px rgba(255, 61, 113, 0.3); }
+    .slot.vacant { border-color: var(--vacant-color); }
+    
+    .car-model { font-size: 60px; position: absolute; top: 15%; transition: 0.6s; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.8)); }
+    .occupied .car-model { transform: translateZ(50px); animation: float 2s infinite ease-in-out; }
+    .vacant .car-model { opacity: 0.1; transform: translateZ(0) scale(0.8) grayscale(1); }
+    
+    @keyframes float { 0%, 100% { transform: translateZ(50px) translateY(0); } 50% { transform: translateZ(70px) translateY(-10px); } }
+
+    /* Info Panels */
+    .panel { background: var(--glass); border-radius: 20px; padding: 25px; border: 1px solid rgba(0, 210, 255, 0.2); backdrop-filter: blur(10px); }
+    .analysis-panel { flex: 2; min-width: 350px; }
+    .log-panel { flex: 1; min-width: 300px; max-height: 400px; overflow-y: auto; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    
+    .log-item { padding: 10px; border-left: 3px solid var(--accent); background: rgba(255,255,255,0.03); margin-bottom: 8px; font-size: 0.9rem; animation: slideIn 0.3s ease-out; }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+    
+    .text-occupied { color: var(--occupied-color); }
+    .text-vacant { color: var(--vacant-color); }
+  </style>
+</head>
+<body>
+
+<h1 style="margin-top:40px;"><i class="fa-solid fa-tower-broadcast"></i> SMART PARKING LIVE</h1>
+
+<div class="dashboard-container">
+  <div class="stat-card">
+    <i class="fa-solid fa-square-check" style="color: var(--vacant-color)"></i><br>ว่าง: <span id="free">0</span>
+  </div>
+  <div class="stat-card">
+    <i class="fa-solid fa-car-side" style="color: var(--occupied-color)"></i><br>เต็ม: <span id="used">0</span>
+  </div>
+  <div class="stat-card">
+    <i class="fa-solid fa-fire-flame-curved" style="color: #ff9f43"></i><br>ยอดฮิต: <span id="hot-slot" style="color: var(--accent)">-</span>
+  </div>
+</div>
+
+<div class="scene">
+  <div class="parking-grid" id="parking"></div>
+</div>
+
+<div class="dashboard-container" style="margin-bottom: 50px;">
+  <!-- ตารางวิเคราะห์ -->
+  <div class="panel analysis-panel">
+    <h3><i class="fa-solid fa-chart-simple"></i> Analytics</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>ช่องจอด</th>
+          <th>สถานะ</th>
+          <th>เข้าจอด (ครั้ง)</th>
+          <th>เฉลี่ยเวลาจอด</th>
+        </tr>
+      </thead>
+      <tbody id="analysis-body"></tbody>
+    </table>
+  </div>
+
+  <!-- บันทึกเหตุการณ์สด -->
+  <div class="panel log-panel">
+    <h3><i class="fa-solid fa-list-ul"></i> Live Activity</h3>
+    <div id="activity-log">
+      <div style="opacity:0.5; text-align:center; padding-top:20px;">รอข้อมูลจากเซ็นเซอร์...</div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js";
+
+const firebaseConfig = { databaseURL: "https://smart-parking-2d37c-default-rtdb.asia-southeast1.firebasedatabase.app" };
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+let stats = {}; 
+let lastStates = {};
+let isFirstLoad = true;
+
+const logActivity = (msg, type) => {
+    const logContainer = document.getElementById("activity-log");
+    if (isFirstLoad) logContainer.innerHTML = "";
+    
+    const time = new Date().toLocaleTimeString();
+    const html = `
+        <div class="log-item" style="border-color: ${type === 'in' ? 'var(--occupied-color)' : 'var(--vacant-color)'}">
+            <strong>${time}</strong>: ${msg}
+        </div>`;
+    logContainer.insertAdjacentHTML('afterbegin', html);
+};
+
+const notify = (title, icon) => {
+    Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: icon,
+        title: title,
+        showConfirmButton: false,
+        timer: 4000,
+        background: '#1a2639',
+        color: '#fff',
+        timerProgressBar: true
+    });
+};
+
+onValue(ref(db, "slots"), (snapshot) => {
+  const data = snapshot.val();
+  if (!data) return;
+
+  const parkingDiv = document.getElementById("parking");
+  const analysisBody = document.getElementById("analysis-body");
+  parkingDiv.innerHTML = ""; analysisBody.innerHTML = "";
+
+  let free = 0, used = 0;
+  const now = Date.now();
+
+  for (let key in data) {
+    const status = data[key].status;
+    const isOccupied = (status === "occupied");
+    const slotName = key.toUpperCase();
+    
+    if (!stats[key]) stats[key] = { count: 0, totalTime: 0, avg: 0, startTime: 0 };
+    
+    // ตรวจจับความเคลื่อนไหว
+    if (!isFirstLoad && lastStates[key] !== status) {
+        if (isOccupied) {
+            notify(`ช่อง ${slotName}: มีรถเข้าจอด`, 'warning');
+            logActivity(`รถเข้าจอดที่ช่อง <b>${slotName}</b>`, 'in');
+            stats[key].count++;
+            stats[key].startTime = now;
+        } else {
+            notify(`ช่อง ${slotName}: รถออกแล้ว`, 'success');
+            logActivity(`ช่อง <b>${slotName}</b> ว่างแล้ว`, 'out');
+            if (stats[key].startTime > 0) {
+                const duration = (now - stats[key].startTime) / 1000;
+                stats[key].totalTime += duration;
+                stats[key].avg = stats[key].totalTime / stats[key].count;
+            }
+        }
+    }
+
+    lastStates[key] = status;
+    if (isOccupied) used++; else free++;
+
+    // วาดช่องจอด 3D
+    parkingDiv.innerHTML += `
+      <div class="slot ${status}">
+        <div class="car-model">${isOccupied ? '🏎️' : '<i class="fa-solid fa-square-p" style="opacity:0.2"></i>'}</div>
+        <div style="z-index:10; font-size:14px; font-weight:bold">${slotName}</div>
+      </div>`;
+
+    // วาดตาราง
+    analysisBody.innerHTML += `
+      <tr>
+        <td><i class="fa-solid fa-location-dot"></i> ${slotName}</td>
+        <td class="${isOccupied ? 'text-occupied' : 'text-vacant'}">
+            <i class="fa-solid fa-circle" style="font-size:8px"></i> ${status}
+        </td>
+        <td>${stats[key].count}</td>
+        <td style="color: var(--accent)">${stats[key].avg.toFixed(1)}s</td>
+      </tr>`;
+  }
+
+  document.getElementById("free").textContent = free;
+  document.getElementById("used").textContent = used;
+  
+  const keys = Object.keys(stats);
+  const hotKey = keys.reduce((a, b) => stats[a].count > stats[b].count ? a : b, keys[0]);
+  document.getElementById("hot-slot").textContent = hotKey ? hotKey.toUpperCase() : "-";
+  
+  isFirstLoad = false;
+});
+</script>
+</body>
+</html>
